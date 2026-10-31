@@ -1,0 +1,6 @@
+{
+  "name": "Males Ngonten Studio",
+  "description": "AI video studio frontend untuk Remotion. Studio video open-source, local-first & BYOK untuk konten kreator.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
