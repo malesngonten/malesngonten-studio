@@ -325,18 +325,20 @@ export const mockDb = {
   },
 
   getSystemStatus: (): SystemStatus => {
-    const hasKey = Boolean(secretStore.apiKey || currentAISettings.preset === 'ollama' || currentAISettings.preset === 'lmstudio');
+    const isLocal = currentAISettings.preset === 'ollama' || currentAISettings.preset === 'lmstudio';
+    const hasKey = Boolean(secretStore.apiKey && secretStore.apiKey.trim().length > 0) || isLocal;
     const hasModel = Boolean(currentAISettings.model && currentAISettings.model.trim().length > 0);
-    const isConfigured = hasKey && hasModel;
+    const hasBaseUrl = Boolean(currentAISettings.baseUrl && currentAISettings.baseUrl.trim().length > 0);
+    const isConfigured = hasKey && hasModel && hasBaseUrl;
     const activeAgent = agents.find(a => a.status === 'siap') || agents[0];
     
     return {
       isConfigured,
       isDemoMode: !isConfigured,
-      activeProvider: currentAISettings.preset === 'custom' 
-        ? 'Custom (OpenAI)' 
-        : currentAISettings.preset.toUpperCase(),
-      activeModel: currentAISettings.model || 'Belum dipilih',
+      activeProvider: isConfigured 
+        ? (currentAISettings.preset === 'custom' ? 'Universal OpenAI' : currentAISettings.preset.toUpperCase()) 
+        : 'Belum Terhubung',
+      activeModel: currentAISettings.model || 'Belum Dipilih',
       activeAgent: activeAgent.name,
       agentStatus: activeAgent.status,
     };

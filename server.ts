@@ -8,9 +8,9 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
-  // Binds to 0.0.0.0 by default to support container dev environments & local networking
-  const HOST = process.env.BIND_HOST || '0.0.0.0';
+  const PORT = 3000;
+  // Binds to 0.0.0.0 for AI Studio container dev environment
+  const HOST = '0.0.0.0';
   const isProd = process.env.NODE_ENV === 'production';
 
   app.use(express.json());

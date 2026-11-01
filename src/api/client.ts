@@ -11,7 +11,8 @@ import {
   DetectedAgent, 
   DoctorReport, 
   CompositionProps, 
-  ChatMessage 
+  ChatMessage,
+  ChatActivity 
 } from '../contracts/types.ts';
 import { TemplateManifest, ExtensionManifest } from '../contracts/manifest.ts';
 
@@ -146,6 +147,102 @@ export const apiClient = {
   // Chat
   async getChatMessages(): Promise<ChatMessage[]> {
     return fetchJson<ChatMessage[]>('/api/chat');
+  },
+
+  streamChatMessage(
+    message: string,
+    callbacks: {
+      onUserMessage?: (userMsg: ChatMessage) => void;
+      onToken?: (data: { delta: string; fullText?: string }) => void;
+      onActivity?: (activity: ChatActivity) => void;
+      onCompositionUpdate?: (composition: CompositionProps) => void;
+      onStep?: (step: any) => void;
+      onProgress?: (progress: any) => void;
+      onResult?: (data: { userMessage: ChatMessage; assistantMessage: ChatMessage; updatedComposition: CompositionProps }) => void;
+      onError?: (err: { message: string; errorType?: string; assistantMessage?: ChatMessage }) => void;
+    }
+  ): AbortController {
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const response = await fetch('/api/chat/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+          },
+          body: JSON.stringify({ message }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          const errText = await response.text().catch(() => '');
+          throw new Error(errText || `Server merespon dengan status ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const block of lines) {
+            if (!block.trim()) continue;
+            let currentEvent = 'message';
+            let currentData = '';
+
+            for (const rawLine of block.split('\n')) {
+              const line = rawLine.trim();
+              if (line.startsWith('event:')) {
+                currentEvent = line.replace('event:', '').trim();
+              } else if (line.startsWith('data:')) {
+                currentData = line.replace('data:', '').trim();
+              }
+            }
+
+            if (!currentData) continue;
+
+            try {
+              const parsed = JSON.parse(currentData);
+              if (currentEvent === 'token') {
+                callbacks.onToken?.(parsed);
+              } else if (currentEvent === 'activity') {
+                callbacks.onActivity?.(parsed);
+              } else if (currentEvent === 'composition_update') {
+                callbacks.onCompositionUpdate?.(parsed);
+              } else if (currentEvent === 'user_message') {
+                callbacks.onUserMessage?.(parsed);
+              } else if (currentEvent === 'step') {
+                callbacks.onStep?.(parsed);
+              } else if (currentEvent === 'progress') {
+                callbacks.onProgress?.(parsed);
+              } else if (currentEvent === 'result') {
+                callbacks.onResult?.(parsed);
+              } else if (currentEvent === 'error') {
+                callbacks.onError?.(parsed);
+              }
+            } catch (err) {
+              console.error('Failed to parse SSE event data:', err);
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+        callbacks.onError?.({
+          message: err.message || 'Koneksi ke server terputus',
+          errorType: 'network_error',
+        });
+      }
+    })();
+
+    return controller;
   },
 
   async sendChatMessage(message: string): Promise<{

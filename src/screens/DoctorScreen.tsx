@@ -7,7 +7,10 @@ import {
   RefreshCw, 
   Terminal, 
   Copy, 
-  Check
+  Check,
+  ShieldCheck,
+  Smartphone,
+  Cpu
 } from 'lucide-react';
 import { DoctorReport } from '../contracts/types.ts';
 import { apiClient } from '../api/client.ts';
@@ -44,13 +47,13 @@ export const DoctorScreen: React.FC = () => {
   const handleCopyFullReport = () => {
     if (!report) return;
     const lines = [
-      `=== MALES NGONTEN STUDIO — DIAGNOSTIC REPORT ===`,
+      `=== STUDIO VIDEO AI — LAPORAN KESIAPAN SISTEM ===`,
       `Waktu: ${report.timestamp}`,
-      `OS: ${report.os} (${report.arch})`,
-      `Status: ${report.allHealthy ? 'LULUS (HEALTHY)' : 'PERLU TINDAKAN'}`,
+      `Perangkat: ${report.os} (${report.arch})`,
+      `Status: ${report.allHealthy ? 'SEMUA SIAP DIGUNAKAN' : 'PERLU PERHATIAN'}`,
       `-----------------------------------------------`,
       ...report.items.map(
-        (i) => `[${i.status.toUpperCase()}] ${i.name} (${i.version || 'N/A'})\nDetail: ${i.details}\nSaran: ${i.suggestedFix}\n`
+        (i) => `[${i.status.toUpperCase()}] ${i.name} (${i.version || 'Tersedia'})\nKeterangan: ${i.details}\nSaran: ${i.suggestedFix}\n`
       ),
     ];
     navigator.clipboard.writeText(lines.join('\n'));
@@ -68,15 +71,16 @@ export const DoctorScreen: React.FC = () => {
   }) || [];
 
   return (
-    <div className="max-w-5xl mx-auto px-3 sm:px-6 py-5 pb-24 md:pb-12 space-y-6">
+    <div className="max-w-3xl mx-auto px-3 sm:px-6 py-6 pb-28 md:pb-16 space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-normal text-white flex items-center gap-2.5">
-            <Activity className="w-5 h-5 text-white" /> System Doctor & Diagnostik
+          <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5">
+            <Activity className="w-6 h-6 text-emerald-400" />
+            Pemeriksaan Sistem
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Pemeriksaan integritas komponen lokal: Node.js, FFmpeg, Chromium, agen AI, dan port socket.
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1 leading-relaxed">
+            Mengecek kesiapan komputer atau perangkat Termux Android Anda untuk memproduksi video.
           </p>
         </div>
 
@@ -84,139 +88,132 @@ export const DoctorScreen: React.FC = () => {
           <button
             onClick={runDiagnostics}
             disabled={isLoading}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-full bg-[#20222a] hover:bg-[#2a2c35] text-zinc-200 font-medium text-xs transition-colors cursor-pointer"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-[#1e2028] hover:bg-[#282b36] text-zinc-200 font-medium text-xs sm:text-sm transition-all cursor-pointer active:scale-95"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Diagnosa Ulang</span>
+            <RefreshCw className={`w-4 h-4 text-sky-400 ${isLoading ? 'animate-spin' : ''}`} />
+            <span>Periksa Ulang</span>
           </button>
 
           <button
             onClick={handleCopyFullReport}
-            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-md transition-all cursor-pointer"
+            className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs sm:text-sm shadow-md transition-all cursor-pointer active:scale-95"
           >
-            {copiedReport ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedReport ? 'Tersalin' : 'Salin Laporan'}</span>
+            {copiedReport ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+            <span>{copiedReport ? 'Tersalin' : 'Salin Info'}</span>
           </button>
         </div>
       </div>
 
-      {/* Overview Cards */}
+      {/* Overview Status Cards */}
       <div className="grid grid-cols-3 gap-3">
-        <div className="p-4 rounded-3xl bg-gradient-to-b from-[#1c1d22] to-[#121316] shadow-md flex flex-col justify-between">
-          <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Lulus
+        <div className="p-4 rounded-3xl bg-[#15171e] shadow-md flex flex-col justify-between">
+          <span className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>Siap Pakai</span>
           </span>
-          <span className="text-xl sm:text-2xl font-bold text-white mt-1">{passCount}</span>
+          <span className="text-2xl sm:text-3xl font-bold text-white mt-1.5">{passCount}</span>
         </div>
 
-        <div className="p-4 rounded-3xl bg-gradient-to-b from-[#1c1d22] to-[#121316] shadow-md flex flex-col justify-between">
-          <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-            <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Peringatan
+        <div className="p-4 rounded-3xl bg-[#15171e] shadow-md flex flex-col justify-between">
+          <span className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
+            <span>Perlu Dicatat</span>
           </span>
-          <span className="text-xl sm:text-2xl font-bold text-white mt-1">{warnCount}</span>
+          <span className="text-2xl sm:text-3xl font-bold text-white mt-1.5">{warnCount}</span>
         </div>
 
-        <div className="p-4 rounded-3xl bg-gradient-to-b from-[#1c1d22] to-[#121316] shadow-md flex flex-col justify-between">
-          <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-            <XCircle className="w-3.5 h-3.5 text-zinc-400" /> Gagal
+        <div className="p-4 rounded-3xl bg-[#15171e] shadow-md flex flex-col justify-between">
+          <span className="text-xs text-zinc-400 font-medium flex items-center gap-1.5">
+            <XCircle className="w-4 h-4 text-zinc-400" />
+            <span>Kendala</span>
           </span>
-          <span className="text-xl sm:text-2xl font-bold text-white mt-1">{failCount}</span>
+          <span className="text-2xl sm:text-3xl font-bold text-white mt-1.5">{failCount}</span>
         </div>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 text-xs sm:text-sm">
         <button
           onClick={() => setFilter('all')}
-          className={`px-3.5 py-1.5 rounded-full text-xs transition-colors cursor-pointer ${
+          className={`px-4 py-2 rounded-full font-medium transition-colors cursor-pointer ${
             filter === 'all'
-              ? 'bg-[#2a2c34] text-white font-medium shadow-sm'
-              : 'bg-[#181a20] text-zinc-400 hover:text-white'
+              ? 'bg-white text-black font-semibold shadow-md'
+              : 'bg-[#15171e] text-zinc-400 hover:text-white'
           }`}
         >
-          Semua Item ({report?.items.length || 0})
+          Semua Komponen ({report?.items.length || 0})
         </button>
         <button
           onClick={() => setFilter('needs_action')}
-          className={`px-3.5 py-1.5 rounded-full text-xs transition-colors cursor-pointer ${
+          className={`px-4 py-2 rounded-full font-medium transition-colors cursor-pointer ${
             filter === 'needs_action'
-              ? 'bg-[#2a2c34] text-white font-medium shadow-sm'
-              : 'bg-[#181a20] text-zinc-400 hover:text-white'
+              ? 'bg-white text-black font-semibold shadow-md'
+              : 'bg-[#15171e] text-zinc-400 hover:text-white'
           }`}
         >
           Perlu Perhatian ({warnCount + failCount})
         </button>
       </div>
 
-      {/* Checklist items */}
+      {/* Checklist Items */}
       <div className="space-y-3">
         {filteredItems.map((item, idx) => {
           const isPass = item.status === 'pass';
           const isWarn = item.status === 'warn';
-          const isFail = item.status === 'fail';
 
           return (
             <div
               key={item.id}
-              className="p-4 rounded-3xl bg-gradient-to-b from-[#1c1d22] to-[#121316] shadow-lg transition-all"
+              className="p-4 sm:p-5 rounded-3xl bg-[#15171e] space-y-2.5 shadow-md transition-all"
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="mt-0.5">
-                    {isPass && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
-                    {isWarn && <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />}
-                    {isFail && <XCircle className="w-5 h-5 text-zinc-400 shrink-0" />}
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-white text-sm">{item.name}</h3>
-                      {item.version && (
-                        <span className="font-mono text-[10px] px-2 py-0.5 rounded-full bg-[#181a20] text-zinc-400">
-                          {item.version}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-zinc-400 leading-relaxed">
-                      {item.details}
-                    </p>
+                <div className="flex items-center gap-2.5">
+                  {isPass && <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />}
+                  {isWarn && <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />}
+                  {!isPass && !isWarn && <XCircle className="w-5 h-5 text-rose-400 shrink-0" />}
+                  <div>
+                    <h2 className="text-sm sm:text-base font-semibold text-white">
+                      {item.name}
+                    </h2>
+                    {item.version && (
+                      <span className="text-xs text-zinc-400 font-mono">
+                        Versi: {item.version}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 <span
-                  className={`text-[10px] uppercase font-medium tracking-wider px-2.5 py-0.5 rounded-full shrink-0 ${
+                  className={`text-xs px-3 py-1 rounded-full font-medium shrink-0 ${
                     isPass
                       ? 'bg-emerald-500/15 text-emerald-300'
                       : isWarn
                       ? 'bg-amber-500/15 text-amber-300'
-                      : 'bg-white/10 text-zinc-300'
+                      : 'bg-rose-500/15 text-rose-300'
                   }`}
                 >
-                  {isPass ? 'Lulus' : isWarn ? 'Peringatan' : 'Gagal'}
+                  {isPass ? 'Siap Digunakan' : isWarn ? 'Peringatan' : 'Belum Siap'}
                 </span>
               </div>
 
-              {/* Suggested fix */}
-              {item.suggestedFix && (
-                <div className="mt-3 pt-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
-                  <div className="text-zinc-400">
-                    <strong className="text-zinc-300">Saran Perbaikan: </strong>
-                    <span>{item.suggestedFix}</span>
-                  </div>
+              <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed pl-7">
+                {item.details}
+              </p>
 
+              {item.suggestedFix && (
+                <div className="ml-7 p-3 rounded-2xl bg-[#0f1015] text-xs text-zinc-400 space-y-1.5">
+                  <span className="font-semibold text-zinc-300 block">Saran Praktis:</span>
+                  <p>{item.suggestedFix}</p>
                   {item.fixCommand && (
-                    <button
-                      onClick={() => handleCopyCommand(item.fixCommand!, idx)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#16171c] hover:bg-[#202228] text-zinc-300 font-mono text-[11px] transition-colors cursor-pointer shrink-0"
-                    >
-                      <Terminal className="w-3 h-3 text-zinc-400" />
-                      <span>{item.fixCommand}</span>
-                      {copiedIndex === idx ? (
-                        <Check className="w-3 h-3 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3 h-3 opacity-60" />
-                      )}
-                    </button>
+                    <div className="mt-2 flex items-center justify-between gap-2 p-2 rounded-xl bg-black/60 font-mono text-[11px] text-emerald-300">
+                      <span className="select-all overflow-x-auto">{item.fixCommand}</span>
+                      <button
+                        onClick={() => handleCopyCommand(item.fixCommand!, idx)}
+                        className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white shrink-0 font-sans text-xs transition-colors cursor-pointer"
+                      >
+                        {copiedIndex === idx ? 'Tersalin' : 'Salin Perintah'}
+                      </button>
+                    </div>
                   )}
                 </div>
               )}

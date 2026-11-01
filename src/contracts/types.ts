@@ -16,6 +16,7 @@ export interface DetectedAgent {
 }
 
 export type ProviderPreset = 
+  | 'gemini'
   | 'custom'
   | 'nvidia'
   | 'openrouter'
@@ -76,12 +77,70 @@ export interface DoctorReport {
   allHealthy: boolean;
 }
 
+export interface ChatActivity {
+  type: 'analysis' | 'file' | 'remotion' | 'render';
+  title: string;
+  detail?: string;
+  file?: string;
+  command?: string;
+  status: 'running' | 'done' | 'error';
+}
+
+export interface ChatStep {
+  id: string;
+  title: string;
+  detail?: string;
+  file?: string;
+  command?: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+}
+
+export interface LayerTransform {
+  startSec: number;
+  durationSec: number;
+  x: number;
+  y: number;
+  scale: number;
+  visible: boolean;
+}
+
+export type LayerType = 'headline' | 'subtext' | 'tagline' | 'author' | 'text' | 'image' | 'audio' | 'video';
+
+export interface TimelineLayerItem {
+  id: string;
+  name: string;
+  type: LayerType;
+  startSec: number;
+  durationSec: number;
+  x: number;
+  y: number;
+  scale: number;
+  visible: boolean;
+  content?: string;
+  color?: string;
+  trackIndex?: number;
+}
+
+export interface MediaAsset {
+  id: string;
+  name: string;
+  type: 'image' | 'audio' | 'video';
+  url: string;
+  thumbnail?: string;
+  size?: string;
+  durationSec?: number;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: string;
+  status?: 'sending' | 'streaming' | 'success' | 'error';
+  errorMessage?: string;
   suggestedProps?: Partial<CompositionProps>;
+  appliedCompositionSnapshot?: CompositionProps;
+  actionSummary?: string;
   actionRequest?: {
     type: 'install_library' | 'apply_preset' | 'change_template';
     title: string;
@@ -90,6 +149,10 @@ export interface ChatMessage {
     version?: string;
     payload?: unknown;
   };
+  activity?: ChatActivity;
+  steps?: ChatStep[];
+  activeFile?: string;
+  activeCommand?: string;
 }
 
 export interface CompositionProps {
@@ -106,4 +169,13 @@ export interface CompositionProps {
   fontStyle: 'display' | 'sans' | 'mono';
   animationPreset: 'kinetic-pop' | 'typewriter' | 'neon-pulse' | 'smooth-slide';
   authorHandle: string;
+  layers?: {
+    tagline?: Partial<LayerTransform>;
+    headline?: Partial<LayerTransform>;
+    subtext?: Partial<LayerTransform>;
+    author?: Partial<LayerTransform>;
+    [key: string]: any;
+  };
+  timelineLayers?: TimelineLayerItem[];
+  customAssets?: MediaAsset[];
 }

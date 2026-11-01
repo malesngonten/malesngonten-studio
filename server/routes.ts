@@ -9,7 +9,14 @@ export const apiRouter = Router();
  * Handles trailing slashes, full endpoints, missing /v1, etc.
  */
 export function resolveChatEndpoint(baseUrl: string): string {
-  let url = baseUrl.trim().replace(/\/+$/, '');
+  let url = (baseUrl || '').trim().replace(/\/+$/, '');
+  if (!url) {
+    return 'https://api.openai.com/v1/chat/completions';
+  }
+  if (url.includes('generativelanguage.googleapis.com')) {
+    if (url.endsWith('/chat/completions')) return url;
+    return 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+  }
   if (url.endsWith('/chat/completions')) {
     return url;
   }
@@ -27,7 +34,14 @@ export function resolveChatEndpoint(baseUrl: string): string {
 }
 
 export function resolveModelsEndpoint(baseUrl: string): string {
-  let url = baseUrl.trim().replace(/\/+$/, '');
+  let url = (baseUrl || '').trim().replace(/\/+$/, '');
+  if (!url) {
+    return 'https://api.openai.com/v1/models';
+  }
+  if (url.includes('generativelanguage.googleapis.com')) {
+    if (url.endsWith('/models')) return url;
+    return 'https://generativelanguage.googleapis.com/v1beta/openai/models';
+  }
   if (url.endsWith('/chat/completions')) {
     url = url.replace(/\/chat\/completions$/, '');
   }
@@ -84,6 +98,23 @@ apiRouter.post('/settings/ai', (req, res) => {
 apiRouter.post('/settings/fetch-models', async (req, res) => {
   const settings = mockDb.getAISettings();
   const rawKey = req.body.apiKey || mockDb.getRawApiKey();
+  const preset = req.body.preset || settings.preset;
+
+  if (preset === 'gemini') {
+    return res.json({
+      success: true,
+      data: {
+        count: 4,
+        models: [
+          'gemini-3.8-flash',
+          'gemini-2.5-pro',
+          'gemini-2.0-flash',
+          'gemini-2.0-flash-lite'
+        ],
+      },
+    });
+  }
+
   const baseUrl = req.body.baseUrl || settings.baseUrl;
   const endpoint = resolveModelsEndpoint(baseUrl);
 
@@ -157,11 +188,11 @@ apiRouter.post('/settings/test-connection', async (req, res) => {
   if (!rawKey && !isLocal) {
     return res.status(400).json({
       success: false,
-      message: 'API Key belum diisi. Masukkan API Key terlebih dahulu atau pilih provider lokal.',
+      message: 'Kunci API (API Key) belum diisi. Masukkan kunci API Anda terlebih dahulu.',
       data: {
         success: false,
         errorType: 'invalid_key',
-        message: 'API Key belum diisi. Masukkan API Key terlebih dahulu.',
+        message: 'Kunci API (API Key) belum diisi. Masukkan kunci API Anda terlebih dahulu.',
       },
     });
   }
@@ -169,13 +200,47 @@ apiRouter.post('/settings/test-connection', async (req, res) => {
   if (!settings.model || !settings.model.trim()) {
     return res.status(400).json({
       success: false,
-      message: 'Nama model belum dipilih. Silakan ketik nama model pilihan Anda atau klik "Ambil Model dari Akun".',
+      message: 'Nama model belum dipilih. Silakan pilih atau ketik nama model yang ingin digunakan.',
       data: {
         success: false,
         errorType: 'model_not_found',
-        message: 'Nama model belum dipilih. Silakan ketik nama model pilihan Anda atau klik "Ambil Model dari Akun".',
+        message: 'Nama model belum dipilih.',
       },
     });
+  }
+
+  // Handle Google Gemini natively via @google/genai
+  if (settings.preset === 'gemini') {
+    const startTime = Date.now();
+    try {
+      const { GoogleGenAI } = await import('@google/genai');
+      const ai = new GoogleGenAI({ apiKey: rawKey });
+      const targetModel = settings.model || 'gemini-3.8-flash';
+      await ai.models.generateContent({
+        model: targetModel,
+        contents: 'Ping test. Jawab: OK',
+      });
+      const latencyMs = Date.now() - startTime;
+      return res.json({
+        success: true,
+        data: {
+          success: true,
+          message: `Koneksi ke Google Gemini (${targetModel}) berhasil! Waktu respon: ${latencyMs}ms.`,
+          latencyMs,
+          detectedModel: targetModel,
+        },
+      });
+    } catch (err: any) {
+      return res.status(400).json({
+        success: false,
+        message: `Gagal terhubung ke Google Gemini: ${err.message}`,
+        data: {
+          success: false,
+          errorType: 'invalid_key',
+          message: `Gagal terhubung ke Google Gemini: ${err.message}`,
+        },
+      });
+    }
   }
 
   // Real connection test to OpenAI-compatible endpoint
@@ -413,26 +478,30 @@ apiRouter.post('/composition', (req, res) => {
   });
 });
 
-// 9. Chat
-apiRouter.get('/chat', (req, res) => {
-  res.json({
-    success: true,
-    data: mockDb.getChatMessages(),
-  });
-});
+// 9. Chat Service & Dynamic Contextual Streaming Endpoints
+interface AIChatExecutionResult {
+  text: string;
+  suggestedProps?: any;
+  actionRequest?: any;
+  activity?: {
+    type: 'analysis' | 'file' | 'remotion' | 'render';
+    title: string;
+    detail?: string;
+    file?: string;
+    command?: string;
+    status: 'running' | 'done' | 'error';
+  };
+  activeFile?: string;
+  activeCommand?: string;
+  isError?: boolean;
+  errorType?: 'invalid_key' | 'quota_exceeded' | 'model_not_found' | 'network_error' | 'provider_error';
+}
 
-apiRouter.post('/chat', async (req, res) => {
-  const { message } = req.body;
-  if (!message || typeof message !== 'string') {
-    return res.status(400).json({ success: false, message: 'Pesan tidak boleh kosong' });
-  }
-
-  // 1. Add user message
-  const userMsg = mockDb.addChatMessage({
-    sender: 'user',
-    text: message,
-  });
-
+async function streamAIChat(
+  message: string,
+  sendEvent: (event: string, data: any) => void,
+  isAborted: () => boolean
+): Promise<AIChatExecutionResult> {
   const settings = mockDb.getAISettings();
   const rawKey = mockDb.getRawApiKey();
   const isLocal = settings.preset === 'ollama' || settings.preset === 'lmstudio' || settings.baseUrl.includes('localhost') || settings.baseUrl.includes('127.0.0.1');
@@ -440,20 +509,61 @@ apiRouter.post('/chat', async (req, res) => {
   const hasModel = Boolean(settings.model && settings.model.trim().length > 0);
   const hasConfiguredAI = hasKey && hasModel;
 
-  let aiReplyText = '';
+  const trimmedLower = message.trim().toLowerCase();
+
+  // Contextual intent identification
+  const isGreeting = /^(halo|hai|hi|hey|helo|pagi|siang|sore|malam|selamat|tes|test|ping|assalamu|oy|oi)\b/i.test(trimmedLower) ||
+    ['halo', 'hai', 'siapa kamu', 'kamu siapa', 'apa kabar', 'help', 'bantuan', 'halo studio'].includes(trimmedLower);
+
+  const isExplainCode = /(jelaskan kode|bagaimana kode|analisis kode|struktur kode|remotion code|kode ini|explain code|jelaskan arsitektur|cara kerja kode)/i.test(trimmedLower);
+
+  const isRenderRequest = /(render video|render|ekspor video|export video|export mp4|unduh video|download mp4|hasil render)/i.test(trimmedLower);
+
+  let rawAccumulated = '';
   let suggestedProps: any = undefined;
   let actionRequest: any = undefined;
+  let activeActivity: any = undefined;
+  let activeFile: string | undefined = undefined;
+  let activeCommand: string | undefined = undefined;
+  let isError = false;
+  let errorType: AIChatExecutionResult['errorType'] = undefined;
 
+  // Validation: Key present but no model selected
   if (hasKey && !hasModel) {
-    aiReplyText = '⚠️ API Key telah terdeteksi, namun Model AI belum Anda pilih. Silakan buka tab Pengaturan AI, lalu ketik nama model pilihan Anda atau klik "Ambil Model dari Akun".';
-  } else if (hasConfiguredAI) {
-    const endpoint = resolveChatEndpoint(settings.baseUrl);
+    const errorText = '⚠️ API Key telah terdeteksi, namun Nama Model AI belum Anda tentukan. Buka tab Pengaturan AI, lalu pilih model yang ingin digunakan.';
+    sendEvent('token', { delta: errorText });
+    return {
+      text: errorText,
+      isError: true,
+      errorType: 'model_not_found',
+    };
+  }
+
+  // 1. REAL AI PROVIDER (when configured)
+  if (hasConfiguredAI) {
+    if (isExplainCode) {
+      activeActivity = {
+        type: 'analysis',
+        title: 'Menganalisis kode & komponen Remotion',
+        file: 'src/remotion/KineticComposition.tsx',
+        status: 'running',
+      };
+      sendEvent('activity', activeActivity);
+    } else if (isRenderRequest) {
+      activeActivity = {
+        type: 'render',
+        title: 'Mengecek kesiapan render Remotion',
+        command: 'npx remotion render src/remotion/index.ts Out video.mp4',
+        status: 'running',
+      };
+      sendEvent('activity', activeActivity);
+    }
+
     const currentComp = mockDb.getComposition();
     const chatHistory = mockDb.getChatMessages().slice(-6);
 
-    const systemPrompt = `Kamu adalah sutradara video kreatif untuk "Males Ngonten Studio", aplikasi AI Video Studio frontend untuk Remotion.
-Karaktermu: Santai, solutif, kreatif dalam meracik copywriting hook 3 detik pertama (TikTok, Reels, Shorts), dan berbahasa Indonesia gaul/kreator.
-
+    const systemPrompt = `Kamu adalah asisten cerdas untuk "Males Ngonten Studio", aplikasi AI Video Studio frontend untuk Remotion.
+Bahasa: Bahasa Indonesia gaul, ramah, dan profesional bagi kreator konten.
 State komposisi video saat ini:
 - Headline: "${currentComp.headline}"
 - Highlight Word: "${currentComp.highlightWord}"
@@ -463,140 +573,210 @@ State komposisi video saat ini:
 - Warna: ${currentComp.primaryColor} (primer), ${currentComp.accentColor} (aksen), ${currentComp.bgColor} (bg)
 - Font: "${currentComp.fontStyle}", Animasi: "${currentComp.animationPreset}"
 
-ATURAN OUTPUT:
-1. Berikan respon percakapan singkat padat.
-2. JIKA ada perubahan teks/warna/animasi video, sertakan blok JSON patch di akhir:
+ATURAN PERILAKU:
+1. Jika pengguna hanya menyapa (contoh: "Halo", "Hai") atau bertanya umum, JAWAB DENGAN PERCAKAPAN BIASA. JANGAN buatkan video atau modifikasi properti video jika tidak diminta.
+2. Jika pengguna meminta penjelasan kode, jelaskan arsitektur React Remotion secara ringkas tanpa memodifikasi file.
+3. HANYA JIKA pengguna secara spesifik meminta membuat/mengubah video (judul, warna, hook, teks, dsb), berikan penjelasan singkat dan sertakan blok JSON patch di akhir respon:
 \`\`\`json_composition_patch
 {
-  "headline": "TEKS HOOK BESAR",
-  "highlightWord": "KATA_DARI_HEADLINE",
-  "subtext": "Penjelasan pendukung",
-  "tagline": "#Hashtag1 #Hashtag2",
-  "primaryColor": "#ef4444",
-  "accentColor": "#f59e0b",
-  "fontStyle": "display",
-  "animationPreset": "kinetic-pop"
+  "headline": "TEKS BARU",
+  "highlightWord": "KATA_DIPILIH",
+  "subtext": "Penjelasan subtext",
+  "primaryColor": "#06b6d4",
+  "bgColor": "#0f172a"
 }
 \`\`\`
-Hanya masukkan field yang ingin diubah.
-3. JIKA butuh library eksternal:
-\`\`\`json_action_request
-{
-  "type": "install_library",
-  "title": "Izin Instalasi Library Remotion",
-  "description": "Alasan singkat...",
-  "packageName": "@remotion/shapes",
-  "version": "^4.0.120"
-}
-\`\`\``;
+Hanya masukkan field yang benar-benar diubah.`;
 
-    try {
-      const controller = new AbortController();
-      // Generous 75s timeout to avoid false aborts on busy cloud shared queues
-      const timeout = setTimeout(() => controller.abort(), 75000);
+    if (settings.preset === 'gemini') {
+      try {
+        const { GoogleGenAI } = await import('@google/genai');
+        const ai = new GoogleGenAI({ apiKey: rawKey });
+        const targetModel = (settings.model && !settings.model.includes('2.5-flash')) ? settings.model : 'gemini-3.8-flash';
 
-      const apiRes = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          ...(rawKey ? { 'Authorization': `Bearer ${rawKey}` } : {}),
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...chatHistory.slice(0, -1).map((m) => ({
-              role: m.sender === 'assistant' ? 'assistant' : 'user',
-              content: m.text,
-            })),
-            { role: 'user', content: message },
-          ],
-          temperature: 0.7,
-          // Fast generation: 450 tokens is plenty for video advice + json patch
-          max_tokens: 450,
-        }),
-        signal: controller.signal,
-      });
+        const historyText = chatHistory.slice(0, -1).map(m => `${m.sender === 'user' ? 'Kreator' : 'Asisten'}: ${m.text}`).join('\n');
+        const fullPrompt = `${systemPrompt}\n\nPercakapan sebelumnya:\n${historyText}\n\nPermintaan kreator: ${message}`;
 
-      clearTimeout(timeout);
+        const responseStream = await ai.models.generateContentStream({
+          model: targetModel,
+          contents: fullPrompt,
+        });
 
-      if (!apiRes.ok) {
-        const errText = await apiRes.text().catch(() => '');
-        let errMsg = `Status HTTP ${apiRes.status} ${apiRes.statusText}`;
-        try {
-          const parsed = JSON.parse(errText);
-          errMsg = parsed.error?.message || parsed.message || parsed.detail || errMsg;
-        } catch {}
-        aiReplyText = `⚠️ Provider ${settings.preset.toUpperCase()} (${settings.model}) mengembalikan error: ${errMsg}.`;
-      } else {
-        const responseData = await apiRes.json();
-        const rawContent: string = responseData.choices?.[0]?.message?.content || '';
-
-        // Extract json_composition_patch
-        const compPatchMatch = rawContent.match(/```json_composition_patch\s*([\s\S]*?)\s*```/);
-        if (compPatchMatch && compPatchMatch[1]) {
-          try {
-            const parsedComp = JSON.parse(compPatchMatch[1].trim());
-            suggestedProps = parsedComp;
-            mockDb.updateComposition(parsedComp);
-          } catch (e) {
-            console.error('Failed to parse json_composition_patch:', e);
+        for await (const chunk of responseStream) {
+          if (isAborted()) break;
+          const delta = chunk.text || '';
+          if (delta) {
+            rawAccumulated += delta;
+            sendEvent('token', { delta });
           }
         }
-
-        // Extract json_action_request
-        const actionMatch = rawContent.match(/```json_action_request\s*([\s\S]*?)\s*```/);
-        if (actionMatch && actionMatch[1]) {
-          try {
-            actionRequest = JSON.parse(actionMatch[1].trim());
-          } catch (e) {
-            console.error('Failed to parse json_action_request:', e);
-          }
-        }
-
-        // Clean raw json blocks from visible chat text
-        aiReplyText = rawContent
-          .replace(/```json_composition_patch[\s\S]*?```/g, '')
-          .replace(/```json_action_request[\s\S]*?```/g, '')
-          .trim();
-
-        if (!aiReplyText && suggestedProps) {
-          aiReplyText = `Komposisi video diperbarui: "${suggestedProps.headline || 'Hook Baru'}". Cek preview video di atas!`;
+      } catch (err: any) {
+        console.error('Gemini streaming error:', err);
+        isError = true;
+        const msg = err.message || '';
+        if (msg.includes('API_KEY_INVALID') || msg.includes('403') || msg.includes('401')) {
+          errorType = 'invalid_key';
+          rawAccumulated = `Kunci API Google Gemini tidak valid atau tidak memiliki izin akses (${msg}). Periksa kembali di Pengaturan AI.`;
+        } else if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429')) {
+          errorType = 'quota_exceeded';
+          rawAccumulated = `Batas kuota Gemini tercapai (429 Rate Limit). Silakan coba sesaat lagi atau gunakan API key lain.`;
+        } else if (msg.includes('NOT_FOUND') || msg.includes('404')) {
+          errorType = 'model_not_found';
+          rawAccumulated = `Model Gemini "${settings.model}" tidak ditemukan. Silakan pilih model lain di Pengaturan AI.`;
+        } else {
+          errorType = 'provider_error';
+          rawAccumulated = `Gagal mendapatkan respon dari Google Gemini: ${msg}.`;
         }
       }
-    } catch (err: any) {
-      console.error('Error invoking real AI provider:', err);
-      const isTimeout = err.name === 'AbortError';
-      if (isTimeout) {
-        aiReplyText = `⚠️ Waktu tunggu habis (>75 detik) saat menghubungi ${settings.baseUrl}.
-Penyebab: Model "${settings.model}" sedang mengantre atau kelebihan beban di provider Anda.
-Solusi Cepat:
-1. Di menu Pengaturan AI, gunakan model yang sangat cepat & ringan seperti:
-   • "mistralai/mistral-7b-instruct-v0.3" (Sangat cepat di NVIDIA NIM)
-   • "deepseek-ai/deepseek-v4.1-flash"
-   • "nv-mistralai/mistral-nemo-12b-instruct"
-2. Atau gunakan tombol "Ambil Model Tersedia" untuk memilih model aktif dari akun Anda.`;
-      } else {
-        aiReplyText = `⚠️ Terjadi kendala saat menghubungi AI (${err.message}). Pastikan Base URL & API Key sudah valid.`;
+    } else {
+      // OpenAI-compatible streaming
+      const endpoint = resolveChatEndpoint(settings.baseUrl);
+      try {
+        const apiRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(rawKey ? { 'Authorization': `Bearer ${rawKey}` } : {}),
+          },
+          body: JSON.stringify({
+            model: settings.model,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              ...chatHistory.slice(0, -1).map(m => ({
+                role: m.sender === 'assistant' ? 'assistant' : 'user',
+                content: m.text,
+              })),
+              { role: 'user', content: message },
+            ],
+            stream: true,
+            temperature: 0.7,
+          }),
+        });
+
+        if (!apiRes.ok) {
+          const errText = await apiRes.text().catch(() => '');
+          let errMsg = `Status HTTP ${apiRes.status} ${apiRes.statusText}`;
+          try {
+            const parsed = JSON.parse(errText);
+            errMsg = parsed.error?.message || parsed.message || parsed.detail || errMsg;
+          } catch {
+            if (errText) errMsg += `: ${errText.slice(0, 150)}`;
+          }
+          isError = true;
+          if (apiRes.status === 401 || apiRes.status === 403) {
+            errorType = 'invalid_key';
+            rawAccumulated = `Kunci API tidak valid atau ditolak (${settings.preset.toUpperCase()}): ${errMsg}`;
+          } else if (apiRes.status === 429) {
+            errorType = 'quota_exceeded';
+            rawAccumulated = `Batas kuota habis (${settings.preset.toUpperCase()}): ${errMsg}`;
+          } else if (apiRes.status === 404) {
+            errorType = 'model_not_found';
+            rawAccumulated = `Model "${settings.model}" tidak ditemukan di ${settings.preset.toUpperCase()}.`;
+          } else {
+            errorType = 'provider_error';
+            rawAccumulated = `Provider ${settings.preset.toUpperCase()} mengembalikan error: ${errMsg}`;
+          }
+        } else if (apiRes.body) {
+          const reader = apiRes.body.getReader();
+          const decoder = new TextDecoder('utf-8');
+          let buffer = '';
+
+          while (true) {
+            if (isAborted()) break;
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed || !trimmed.startsWith('data:')) continue;
+              const jsonStr = trimmed.slice(5).trim();
+              if (jsonStr === '[DONE]') break;
+              try {
+                const parsed = JSON.parse(jsonStr);
+                const delta = parsed.choices?.[0]?.delta?.content || '';
+                if (delta) {
+                  rawAccumulated += delta;
+                  sendEvent('token', { delta });
+                }
+              } catch {}
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('Error contacting AI provider:', err);
+        isError = true;
+        errorType = 'network_error';
+        rawAccumulated = `Gagal menghubungi endpoint provider (${err.message || 'Network error'}). Periksa koneksi internet Anda.`;
       }
     }
   }
 
-  // 3. Fallback to mock ONLY when in Demo Mode (no key provided)
-  if (!aiReplyText) {
-    const lower = message.toLowerCase();
-    if (lower.includes('headline') || lower.includes('judul') || lower.includes('hook')) {
-      aiReplyText = '[Mode Demo] Saya telah memperbarui teks hook video Anda agar lebih memikat perhatian audiens di 3 detik pertama!';
-      suggestedProps = {
-        headline: 'RAHASIA KONTEN VIRAL TERBONGKAR!',
-        highlightWord: 'VIRAL',
-        subtext: 'Jangan cuma scroll, tonton trik 30 detik ini sekarang juga!',
-        animationPreset: 'kinetic-pop',
+  // 2. DEMO MODE (when no API key or offline demo)
+  if (!hasConfiguredAI && !isError) {
+    const helperStreamTokens = async (text: string) => {
+      const words = text.match(/\S+\s*/g) || [text];
+      for (const word of words) {
+        if (isAborted()) break;
+        rawAccumulated += word;
+        sendEvent('token', { delta: word });
+        await new Promise(r => setTimeout(r, 22));
+      }
+    };
+
+    if (isGreeting) {
+      // PURE CASUAL GREETING - Zero workflow steps, zero file modifications!
+      await helperStreamTokens(
+        'Halo! Saya asisten kreatif Males Ngonten Studio.\n\nSaya siap membantu Anda membuat video kinetik vertikal untuk TikTok, Instagram Reels, dan YouTube Shorts. Anda bisa meminta saya meracik ide hook 3 detik pertama, mengubah palet warna, memilih gaya font, atau menjelaskan arsitektur Remotion. Apa yang ingin kita buat hari ini?'
+      );
+    } else if (isExplainCode) {
+      activeActivity = {
+        type: 'analysis',
+        title: 'Menganalisis file src/remotion/KineticComposition.tsx',
+        file: 'src/remotion/KineticComposition.tsx',
+        status: 'running',
       };
-      mockDb.updateComposition(suggestedProps);
-    } else if (lower.includes('warna') || lower.includes('cyber') || lower.includes('tema') || lower.includes('color')) {
-      aiReplyText = '[Mode Demo] Saya telah mengubah palet warna video ke gaya Cyberpunk Neon yang mencolok!';
+      sendEvent('activity', activeActivity);
+
+      await helperStreamTokens(
+        'Males Ngonten Studio menggunakan arsitektur video-as-code berbasis Remotion:\n\n' +
+        '1. Komponen Utama: Berada di `src/remotion/KineticComposition.tsx`.\n' +
+        '2. Timing & Frame: Menggunakan hook `useCurrentFrame()` dan fungsi `spring()` dari Remotion untuk menghitung transisi teks per frame secara presisi matematika.\n' +
+        '3. Reaktivitas: Properti seperti headline, highlightWord, subtext, dan warna dikontrol langsung oleh state React tanpa membutuhkan kompilasi ulang.'
+      );
+
+      activeActivity = { ...activeActivity, status: 'done', title: 'Analisis komponen Remotion selesai' };
+      sendEvent('activity', activeActivity);
+    } else if (isRenderRequest) {
+      activeActivity = {
+        type: 'render',
+        title: 'Menyiapkan render video Remotion',
+        command: 'npx remotion render src/remotion/index.ts Out video.mp4',
+        status: 'running',
+      };
+      sendEvent('activity', activeActivity);
+
+      await helperStreamTokens(
+        'Untuk merender video ke format MP4 secara aktual:\n\n' +
+        '• Jalankan di terminal: `npx remotion render src/remotion/index.ts Out video.mp4 --codec=h264`\n' +
+        '• Atau klik tombol "Ekspor" di pojok kanan atas aplikasi untuk memilih preset resolusi (9:16 / 16:9) dan mengunduh video langsung.'
+      );
+
+      activeActivity = { ...activeActivity, status: 'done', title: 'Antrean render video siap' };
+      sendEvent('activity', activeActivity);
+      activeCommand = 'npx remotion render src/remotion/index.ts Out video.mp4';
+    } else if (trimmedLower.includes('warna') || trimmedLower.includes('cyber') || trimmedLower.includes('tema') || trimmedLower.includes('color')) {
+      activeActivity = {
+        type: 'file',
+        title: 'Memperbarui tema warna video',
+        file: 'src/remotion/KineticComposition.tsx',
+        status: 'running',
+      };
+      sendEvent('activity', activeActivity);
+
       suggestedProps = {
         primaryColor: '#06b6d4',
         accentColor: '#f43f5e',
@@ -604,21 +784,24 @@ Solusi Cepat:
         fontStyle: 'mono',
       };
       mockDb.updateComposition(suggestedProps);
-    } else if (lower.includes('library') || lower.includes('shape') || lower.includes('pasang') || lower.includes('install')) {
-      aiReplyText = '[Mode Demo] Untuk menghasilkan efek bentuk geometris dinamis, saya memerlukan library `@remotion/shapes`. Mohon konfirmasi instalasi berikut:';
-      actionRequest = {
-        type: 'install_library',
-        title: 'Izin Instalasi Library Remotion',
-        description: 'AI mendeteksi kebutuhan rendering bentuk vektor SVG dinamis untuk latar belakang video.',
-        packageName: '@remotion/shapes',
-        version: '^4.0.120',
-        payload: {
-          command: 'npm install @remotion/shapes',
-          permissions: ['Akses Canvas SVG', 'Bundle Assets'],
-        },
+      sendEvent('composition_update', suggestedProps);
+
+      await helperStreamTokens(
+        'Palet warna video telah diubah ke gaya Cyberpunk Neon (#06b6d4 & #f43f5e) dengan latar belakang gelap. Pratinjau video di atas langsung terupdate!'
+      );
+
+      activeActivity = { ...activeActivity, status: 'done', title: 'Palet warna disinkronkan ke video' };
+      sendEvent('activity', activeActivity);
+      activeFile = 'src/remotion/KineticComposition.tsx';
+    } else if (trimmedLower.includes('santai') || trimmedLower.includes('chill') || trimmedLower.includes('aesthetic')) {
+      activeActivity = {
+        type: 'file',
+        title: 'Menyesuaikan mood aesthetic video',
+        file: 'src/remotion/KineticComposition.tsx',
+        status: 'running',
       };
-    } else if (lower.includes('santai') || lower.includes('chill') || lower.includes('aesthetic')) {
-      aiReplyText = '[Mode Demo] Siap! Komposisi disesuaikan dengan mood chill aesthetic.';
+      sendEvent('activity', activeActivity);
+
       suggestedProps = {
         headline: 'TENANG, SEMUANYA AKAN INDAH PADA WAKTUNYA',
         highlightWord: 'INDAH',
@@ -630,30 +813,300 @@ Solusi Cepat:
         animationPreset: 'smooth-slide',
       };
       mockDb.updateComposition(suggestedProps);
-    } else {
-      aiReplyText = `[Mode Demo] Ide bagus: "${message}". Komposisi telah disesuaikan. (Catatan: Ini adalah respon simulasi demo. Masukkan API key di menu Pengaturan AI untuk mendapatkan balasan AI sungguhan!)`;
+      sendEvent('composition_update', suggestedProps);
+
+      await helperStreamTokens(
+        'Komposisi video disesuaikan ke gaya aesthetic santai dengan transisi lembut dan tone warna pastel. Cek hasilnya pada pratinjau video!'
+      );
+
+      activeActivity = { ...activeActivity, status: 'done', title: 'Komposisi aesthetic diterapkan' };
+      sendEvent('activity', activeActivity);
+      activeFile = 'src/remotion/KineticComposition.tsx';
+    } else if (trimmedLower.includes('library') || trimmedLower.includes('shape') || trimmedLower.includes('pasang') || trimmedLower.includes('install')) {
+      activeActivity = {
+        type: 'remotion',
+        title: 'Pemeriksaan paket dependensi Remotion',
+        command: 'npm install @remotion/shapes',
+        status: 'running',
+      };
+      sendEvent('activity', activeActivity);
+
+      actionRequest = {
+        type: 'install_library',
+        title: 'Izin Instalasi Library Remotion',
+        description: 'Dibutuhkan library @remotion/shapes untuk rendering elemen bentuk geometris dinamis.',
+        packageName: '@remotion/shapes',
+        version: '^4.0.120',
+        payload: {
+          command: 'npm install @remotion/shapes',
+          permissions: ['Canvas SVG', 'Bundle Assets'],
+        },
+      };
+
+      await helperStreamTokens(
+        'Untuk membuat elemen grafis geometris, diperlukan library `@remotion/shapes`. Konfirmasi instalasi pada kartu dialog di bawah untuk memasangnya.'
+      );
+
+      activeActivity = { ...activeActivity, status: 'done', title: 'Permintaan dependensi siap ditinjau' };
+      sendEvent('activity', activeActivity);
+    } else if (trimmedLower.includes('buat') || trimmedLower.includes('bikin') || trimmedLower.includes('hook') || trimmedLower.includes('judul') || trimmedLower.includes('headline') || trimmedLower.includes('video')) {
+      activeActivity = {
+        type: 'file',
+        title: 'Membuat komposisi video baru',
+        file: 'src/remotion/KineticComposition.tsx',
+        status: 'running',
+      };
+      sendEvent('activity', activeActivity);
+
+      const words = message.trim().split(/\s+/);
+      const headlineText = message.length > 40 ? message.slice(0, 40).toUpperCase() : message.toUpperCase();
       suggestedProps = {
-        headline: message.slice(0, 35).toUpperCase(),
-        highlightWord: message.split(' ')[0]?.toUpperCase() || 'KONTEN',
-        subtext: 'Dibuat otomatis oleh Males Ngonten Studio.',
+        headline: headlineText,
+        highlightWord: words[0]?.toUpperCase() || 'KONTEN',
+        subtext: 'Bikin video reels & tiktok 10x lebih cepat pakai template otomatis.',
+        animationPreset: 'kinetic-pop',
       };
       mockDb.updateComposition(suggestedProps);
+      sendEvent('composition_update', suggestedProps);
+
+      await helperStreamTokens(
+        `Video berhasil dibuat dengan hook "${headlineText}". Parameter komposisi telah langsung disinkronkan ke canvas Remotion di atas.`
+      );
+
+      activeActivity = { ...activeActivity, status: 'done', title: 'Komposisi video berhasil disinkronkan' };
+      sendEvent('activity', activeActivity);
+      activeFile = 'src/remotion/KineticComposition.tsx';
+    } else {
+      // General question in demo mode
+      await helperStreamTokens(
+        `Pertanyaan Anda: "${message}".\n\nDi Males Ngonten Studio, Anda dapat menginstruksikan AI untuk membuat video pendek, mengatur teks hook, mengganti warna, atau memasang template baru. Anda juga dapat menghubungkan Kunci API (Google Gemini, OpenAI, Groq, DeepSeek, Ollama) di menu Pengaturan AI untuk kecerdasan penuh.`
+      );
     }
   }
 
-  const assistantMsg = mockDb.addChatMessage({
-    sender: 'assistant',
-    text: aiReplyText,
+  // 3. PARSE REAL AI RESPONSE PATCHES (if real provider was used)
+  if (hasConfiguredAI && !isError) {
+    // Extract json_composition_patch
+    const compPatchMatch = rawAccumulated.match(/```json_composition_patch\s*([\s\S]*?)\s*```/);
+    if (compPatchMatch && compPatchMatch[1]) {
+      try {
+        const parsedComp = JSON.parse(compPatchMatch[1].trim());
+        suggestedProps = parsedComp;
+        mockDb.updateComposition(parsedComp);
+        sendEvent('composition_update', parsedComp);
+        activeActivity = {
+          type: 'file',
+          title: 'Memperbarui komposisi video',
+          file: 'src/remotion/KineticComposition.tsx',
+          detail: 'Parameter visual berhasil disinkronkan ke video',
+          status: 'done',
+        };
+        sendEvent('activity', activeActivity);
+        activeFile = 'src/remotion/KineticComposition.tsx';
+      } catch (e) {
+        console.error('Failed to parse json_composition_patch:', e);
+      }
+    }
+
+    // Extract json_action_request
+    const actionMatch = rawAccumulated.match(/```json_action_request\s*([\s\S]*?)\s*```/);
+    if (actionMatch && actionMatch[1]) {
+      try {
+        actionRequest = JSON.parse(actionMatch[1].trim());
+        activeActivity = {
+          type: 'remotion',
+          title: actionRequest.title || 'Permintaan Tindakan AI',
+          detail: actionRequest.description,
+          status: 'done',
+        };
+        sendEvent('activity', activeActivity);
+      } catch (e) {
+        console.error('Failed to parse json_action_request:', e);
+      }
+    }
+
+    if (isExplainCode && !activeActivity) {
+      activeActivity = {
+        type: 'analysis',
+        title: 'Analisis komponen Remotion selesai',
+        status: 'done',
+      };
+      sendEvent('activity', activeActivity);
+    }
+
+    if (isRenderRequest && !activeActivity) {
+      activeActivity = {
+        type: 'render',
+        title: 'Antrean render video Remotion siap',
+        command: 'npx remotion render src/remotion/index.ts Out video.mp4',
+        status: 'done',
+      };
+      sendEvent('activity', activeActivity);
+      activeCommand = 'npx remotion render src/remotion/index.ts Out video.mp4';
+    }
+  }
+
+  const cleanText = rawAccumulated
+    .replace(/```json_composition_patch[\s\S]*?```/g, '')
+    .replace(/```json_action_request[\s\S]*?```/g, '')
+    .trim();
+
+  const finalText = cleanText || (suggestedProps ? `Komposisi video diperbarui: "${suggestedProps.headline || 'Hook Baru'}". Cek pratinjau video di atas!` : rawAccumulated);
+
+  return {
+    text: finalText,
     suggestedProps,
     actionRequest,
+    activity: activeActivity,
+    activeFile,
+    activeCommand,
+    isError,
+    errorType,
+  };
+}
+
+apiRouter.get('/chat', (req, res) => {
+  res.json({
+    success: true,
+    data: mockDb.getChatMessages(),
+  });
+});
+
+// Real-Time Server-Sent Events (SSE) Streaming Chat Endpoint
+apiRouter.post('/chat/stream', async (req, res) => {
+  const { message } = req.body;
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ success: false, message: 'Pesan tidak boleh kosong' });
+  }
+
+  // Enable SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  let isAborted = false;
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      isAborted = true;
+    }
+  });
+
+  const sendEvent = (event: string, data: any) => {
+    if (isAborted) return;
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // 1. Immediately add user message to DB and emit to client
+  const userMsg = mockDb.addChatMessage({
+    sender: 'user',
+    text: message,
+    status: 'sending',
+  });
+  sendEvent('user_message', userMsg);
+
+  // 2. Stream AI response with dynamic, contextual activities
+  const result = await streamAIChat(message, sendEvent, () => isAborted);
+
+  if (isAborted) {
+    res.end();
+    return;
+  }
+
+  if (result.isError) {
+    const errorAssistantMsg = mockDb.addChatMessage({
+      sender: 'assistant',
+      text: result.text,
+      status: 'error',
+      errorMessage: result.text,
+      activity: result.activity,
+      activeFile: result.activeFile,
+      activeCommand: result.activeCommand,
+    });
+
+    sendEvent('error', {
+      message: result.text,
+      errorType: result.errorType,
+      userMessageId: userMsg.id,
+      assistantMessage: errorAssistantMsg,
+    });
+    res.end();
+    return;
+  }
+
+  // 3. Save success assistant message with action history snapshot
+  const changedFields: string[] = [];
+  if (result.suggestedProps) {
+    if (result.suggestedProps.headline) changedFields.push('Judul Hook');
+    if (result.suggestedProps.highlightWord) changedFields.push('Kata Aksen');
+    if (result.suggestedProps.subtext) changedFields.push('Subtext');
+    if (result.suggestedProps.primaryColor || result.suggestedProps.accentColor || result.suggestedProps.bgColor) changedFields.push('Warna');
+    if (result.suggestedProps.aspectRatio) changedFields.push('Format Rasio');
+    if (result.suggestedProps.animationPreset) changedFields.push('Animasi');
+    if (result.suggestedProps.layers) changedFields.push('Layout Layer');
+  }
+
+  const actionSummary = changedFields.length > 0
+    ? `Pembaruan: ${changedFields.join(', ')}`
+    : result.activity?.title || undefined;
+
+  const assistantMsg = mockDb.addChatMessage({
+    sender: 'assistant',
+    text: result.text,
+    status: 'success',
+    suggestedProps: result.suggestedProps,
+    appliedCompositionSnapshot: result.suggestedProps ? JSON.parse(JSON.stringify(mockDb.getComposition())) : undefined,
+    actionSummary,
+    actionRequest: result.actionRequest,
+    activity: result.activity,
+    activeFile: result.activeFile,
+    activeCommand: result.activeCommand,
+  });
+
+  sendEvent('result', {
+    userMessage: { ...userMsg, status: 'success' },
+    assistantMessage: assistantMsg,
+    updatedComposition: result.suggestedProps ? mockDb.getComposition() : undefined,
+  });
+
+  res.end();
+});
+
+// Standard non-streaming fallback endpoint
+apiRouter.post('/chat', async (req, res) => {
+  const { message } = req.body;
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ success: false, message: 'Pesan tidak boleh kosong' });
+  }
+
+  const userMsg = mockDb.addChatMessage({
+    sender: 'user',
+    text: message,
+    status: 'success',
+  });
+
+  const result = await streamAIChat(message, () => {}, () => false);
+
+  const assistantMsg = mockDb.addChatMessage({
+    sender: 'assistant',
+    text: result.text,
+    status: result.isError ? 'error' : 'success',
+    errorMessage: result.isError ? result.text : undefined,
+    suggestedProps: result.suggestedProps,
+    actionRequest: result.actionRequest,
+    activity: result.activity,
+    activeFile: result.activeFile,
+    activeCommand: result.activeCommand,
   });
 
   res.json({
-    success: true,
+    success: !result.isError,
     data: {
       userMessage: userMsg,
       assistantMessage: assistantMsg,
-      updatedComposition: mockDb.getComposition(),
+      updatedComposition: result.suggestedProps ? mockDb.getComposition() : undefined,
+      isError: result.isError,
+      errorType: result.errorType,
     },
   });
 });

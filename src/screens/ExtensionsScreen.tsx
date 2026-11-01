@@ -4,7 +4,8 @@ import {
   Package, 
   Sparkles, 
   Layers, 
-  AlertCircle
+  ShieldCheck,
+  Check
 } from 'lucide-react';
 import { ExtensionManifest, ExtensionType } from '../contracts/manifest.ts';
 import { apiClient } from '../api/client.ts';
@@ -34,7 +35,7 @@ export const ExtensionsScreen: React.FC = () => {
       const updated = await apiClient.toggleExtension(id, !currentEnabled);
       setExtensions((prev) => prev.map((e) => (e.id === id ? updated : e)));
     } catch (err: any) {
-      alert(`Gagal mengubah status ekstensi: ${err.message}`);
+      alert(`Gagal mengubah status: ${err.message}`);
     }
   };
 
@@ -51,10 +52,10 @@ export const ExtensionsScreen: React.FC = () => {
         type: 'library',
         version: '^4.0.120',
         author: 'Remotion Core Team',
-        source: 'npm registry (resmi)',
-        description: 'Perhitungan morphing SVG path dan interpolasi garis bezier dinamis untuk animasi visual.',
+        source: 'npm registry resmi',
+        description: 'Efek garis animasi vektor dinamis dan transisi bentuk geometris untuk mempercantik video.',
         enabled: true,
-        permissions: ['Akses SVG Path Matrix', 'DOM Canvas Manipulation'],
+        permissions: ['Akses Animasi Garis Vektor'],
         requiredNpmPackages: ['@remotion/paths'],
       };
 
@@ -69,10 +70,10 @@ export const ExtensionsScreen: React.FC = () => {
   };
 
   const extensionTypes: { id: 'all' | ExtensionType; label: string; icon: any }[] = [
-    { id: 'all', label: 'Semua', icon: Boxes },
-    { id: 'library', label: 'Library Remotion', icon: Package },
-    { id: 'skill', label: 'AI Skills', icon: Sparkles },
-    { id: 'component', label: 'Component Packs', icon: Layers },
+    { id: 'all', label: 'Semua Fitur', icon: Boxes },
+    { id: 'library', label: 'Library Efek', icon: Package },
+    { id: 'skill', label: 'Keahlian AI', icon: Sparkles },
+    { id: 'component', label: 'Paket Animasi', icon: Layers },
   ];
 
   const filteredExtensions = extensions.filter((ext) => {
@@ -81,54 +82,58 @@ export const ExtensionsScreen: React.FC = () => {
   });
 
   return (
-    <div className="max-w-5xl mx-auto px-3 sm:px-6 py-5 pb-24 md:pb-12 space-y-6">
+    <div className="max-w-4xl mx-auto px-3 sm:px-6 py-6 pb-28 md:pb-16 space-y-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-normal text-white flex items-center gap-2.5">
-            <Boxes className="w-5 h-5 text-white" /> Ekstensi & Library Remotion
+          <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5">
+            <Boxes className="w-6 h-6 text-sky-400" />
+            Fitur &amp; Skill Tambahan
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Kelola modul pendukung, skill prompt AI, dan paket efek animasi visual.
+          <p className="text-xs sm:text-sm text-zinc-400 mt-1 leading-relaxed">
+            Aktifkan atau nonaktifkan modul animasi, gaya bahasa otomatis, dan efek video.
           </p>
         </div>
 
-        {/* Trigger Approval Dialog Simulation Button */}
         <button
           onClick={handleSimulateAiRequest}
-          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs shadow-md transition-all cursor-pointer"
+          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-white hover:bg-zinc-200 text-black font-semibold text-xs sm:text-sm shadow-md transition-all cursor-pointer active:scale-95"
         >
-          <Sparkles className="w-3.5 h-3.5 text-black" />
-          <span>Simulasi Izin AI</span>
+          <Sparkles className="w-4 h-4 text-sky-600" />
+          <span>Uji Izin Fitur Baru</span>
         </button>
       </div>
 
-      {/* Interactive Simulation Explanation Card */}
-      <div className="rounded-3xl bg-gradient-to-b from-[#1c1d22] to-[#121316] p-4 text-xs text-zinc-300 space-y-1.5 shadow-md">
-        <div className="flex items-center gap-2 font-medium text-white">
-          <AlertCircle className="w-4 h-4 shrink-0 text-zinc-400" />
-          <span>Pola Keamanan: Izin Eksplisit Pemasangan Library</span>
+      {/* Safety Notice */}
+      <div className="rounded-3xl bg-[#14161c] p-4 sm:p-5 flex items-start gap-3.5 shadow-md">
+        <div className="w-10 h-10 rounded-2xl bg-sky-500/10 flex items-center justify-center shrink-0 text-sky-400">
+          <ShieldCheck className="w-5 h-5" />
         </div>
-        <p className="text-zinc-400 leading-relaxed pl-6">
-          Ketika agen AI lokal memutuskan membutuhkan paket npm baru untuk merender efek video, AI tidak akan pernah menginstal tanpa persetujuan Anda. Klik tombol <strong>"Simulasi Izin AI"</strong> di atas untuk menguji alur dialog persetujuan.
-        </p>
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold text-white">
+            Kontrol Penuh di Tangan Anda
+          </h2>
+          <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
+            Setiap kali AI membutuhkan library animasi baru, sistem akan selalu meminta persetujuan Anda terlebih dahulu sebelum memasangnya.
+          </p>
+        </div>
       </div>
 
       {/* Type Filter Buttons */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar text-xs sm:text-sm">
         {extensionTypes.map((t) => {
           const Icon = t.icon;
           return (
             <button
               key={t.id}
               onClick={() => setActiveTypeFilter(t.id)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs transition-colors cursor-pointer whitespace-nowrap ${
+              className={`flex items-center gap-2 px-4 py-2 rounded-full whitespace-nowrap transition-colors cursor-pointer ${
                 activeTypeFilter === t.id
-                  ? 'bg-[#2a2c34] text-white font-medium shadow-sm'
-                  : 'bg-[#181a20] text-zinc-400 hover:text-white'
+                  ? 'bg-white text-black font-semibold shadow-md'
+                  : 'bg-[#15171e] text-zinc-400 hover:text-white'
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
+              <Icon className="w-4 h-4" />
               <span>{t.label}</span>
             </button>
           );
@@ -140,33 +145,33 @@ export const ExtensionsScreen: React.FC = () => {
         {filteredExtensions.map((ext) => (
           <div
             key={ext.id}
-            className={`p-4 rounded-3xl bg-gradient-to-b from-[#1c1d22] to-[#121316] transition-all flex flex-col justify-between space-y-3 shadow-lg ${
-              ext.enabled ? 'opacity-100' : 'opacity-55'
+            className={`p-5 rounded-3xl bg-[#15171e] transition-all flex flex-col justify-between space-y-4 shadow-lg ${
+              ext.enabled ? 'opacity-100' : 'opacity-60'
             }`}
           >
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="p-2.5 rounded-2xl bg-[#262831] text-white">
-                    {ext.type === 'library' && <Package className="w-4 h-4" />}
-                    {ext.type === 'skill' && <Sparkles className="w-4 h-4" />}
-                    {ext.type === 'component' && <Layers className="w-4 h-4" />}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-[#1c1e28] flex items-center justify-center text-white shrink-0">
+                    {ext.type === 'library' && <Package className="w-5 h-5 text-sky-400" />}
+                    {ext.type === 'skill' && <Sparkles className="w-5 h-5 text-amber-400" />}
+                    {ext.type === 'component' && <Layers className="w-5 h-5 text-rose-400" />}
                   </div>
                   <div>
-                    <h3 className="font-semibold text-white text-xs sm:text-sm font-mono">
+                    <h3 className="font-semibold text-white text-sm">
                       {ext.name}
                     </h3>
-                    <span className="text-[10px] text-zinc-500 uppercase font-medium tracking-wider">
-                      {ext.type} · v{ext.version}
+                    <span className="text-xs text-zinc-400 capitalize">
+                      {ext.type === 'library' ? 'Library Efek' : ext.type === 'skill' ? 'Keahlian AI' : 'Paket Animasi'}
                     </span>
                   </div>
                 </div>
 
-                {/* Enable/Disable Toggle Switch in Monochrome */}
+                {/* Big Switch Button */}
                 <button
                   onClick={() => handleToggle(ext.id, ext.enabled)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none ${
-                    ext.enabled ? 'bg-white' : 'bg-[#262831]'
+                  className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full p-1 transition-colors duration-200 ease-in-out focus:outline-none ${
+                    ext.enabled ? 'bg-sky-500' : 'bg-[#262831]'
                   }`}
                   role="switch"
                   aria-checked={ext.enabled}
@@ -174,55 +179,41 @@ export const ExtensionsScreen: React.FC = () => {
                 >
                   <span
                     aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full shadow-md transition duration-200 ease-in-out ${
-                      ext.enabled ? 'translate-x-5 bg-black' : 'translate-x-0 bg-white/70'
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
+                      ext.enabled ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
               </div>
 
-              <p className="text-xs text-zinc-400 leading-relaxed">
+              <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
                 {ext.description}
               </p>
             </div>
 
-            {/* Permissions & Source Footer */}
-            <div className="pt-2 space-y-1.5 text-[11px]">
-              <div className="flex items-center justify-between text-zinc-500">
-                <span>Sumber: <strong className="text-zinc-300 font-mono">{ext.source}</strong></span>
-                <span>Karya: <strong className="text-zinc-300">{ext.author}</strong></span>
-              </div>
-
-              {ext.permissions && ext.permissions.length > 0 && (
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {ext.permissions.map((p, idx) => (
-                    <span
-                      key={idx}
-                      className="px-2.5 py-0.5 rounded-full bg-[#16171c] text-zinc-400 text-[10px]"
-                    >
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              )}
+            {/* Footer */}
+            <div className="pt-2 flex items-center justify-between text-xs text-zinc-400">
+              <span>Sumber: <strong className="text-zinc-200">{ext.author}</strong></span>
+              <span className={`px-2.5 py-0.5 rounded-full font-medium ${
+                ext.enabled ? 'bg-emerald-500/15 text-emerald-300' : 'bg-white/5 text-zinc-500'
+              }`}>
+                {ext.enabled ? 'Aktif' : 'Nonaktif'}
+              </span>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Approval Dialog Pattern for AI Library Request */}
+      {/* Approval Dialog */}
       <ApprovalDialog
         isOpen={simulatedPromptDialogOpen}
-        title="AI Meminta Memasang Library Baru"
-        description="Agen AI mendeteksi kebutuhan fungsi kalkulasi SVG path animasi untuk hook visual. Apakah Anda menyetujui eksekusi instalasi library ini di sistem lokal Anda?"
+        title="AI Merekomendasikan Fitur Baru"
+        description="Untuk merender garis vektor dan efek visual yang lebih memukau, AI merekomendasikan pemasangan modul @remotion/paths."
         targetName="@remotion/paths"
         version="^4.0.120"
         license="MIT"
-        shellCommand="npm install @remotion/paths"
-        dependencies={{ '@remotion/paths': '^4.0.120' }}
-        permissions={['Akses SVG Path Matrix', 'DOM Canvas Manipulation']}
-        confirmLabel="Setuju (Izinkan AI)"
-        cancelLabel="Tolak Permintaan"
+        confirmLabel="Ya, Pasang Sekarang"
+        cancelLabel="Nanti Saja"
         onConfirm={handleApproveSimulatedInstall}
         onCancel={() => setSimulatedPromptDialogOpen(false)}
       />
